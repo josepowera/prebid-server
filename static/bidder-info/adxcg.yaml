@@ -17,3 +17,5 @@ userSync:
   # bidder directly at the email address in this file to ask about enabling user sync.
   supports:
     - redirect
+adapter:
+  compression_support: ["gzip"]
