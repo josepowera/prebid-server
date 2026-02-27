@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/prebid/openrtb/v20/openrtb2"
+	"github.com/prebid/prebid-server/v3/hooks/hookanalytics"
 	"github.com/prebid/prebid-server/v3/hooks/hookstage"
 	"github.com/prebid/prebid-server/v3/modules/moduledeps"
 	"github.com/prebid/prebid-server/v3/openrtb_ext"
@@ -81,12 +82,15 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		payload        hookstage.ProcessedAuctionRequestPayload
-		wantReject     bool
-		wantNbrCode    int
-		wantErrors     []string
-		wantMsgContain string
+		name                string
+		payload             hookstage.ProcessedAuctionRequestPayload
+		wantReject          bool
+		wantNbrCode         int
+		wantErrors          []string
+		wantMsgContain      string
+		wantAnalyticStatus  hookanalytics.ResultStatus
+		wantAnalyticCountry string
+		wantActivityStatus  hookanalytics.ActivityStatus
 	}{
 		{
 			name: "allowed country SVN – request passes",
@@ -97,8 +101,11 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					},
 				}),
 			},
-			wantReject:  false,
-			wantNbrCode: 0,
+			wantReject:          false,
+			wantNbrCode:         0,
+			wantAnalyticStatus:  hookanalytics.ResultStatusAllow,
+			wantAnalyticCountry: "SVN",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "allowed country CRO – request passes",
@@ -109,8 +116,11 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					},
 				}),
 			},
-			wantReject:  false,
-			wantNbrCode: 0,
+			wantReject:          false,
+			wantNbrCode:         0,
+			wantAnalyticStatus:  hookanalytics.ResultStatusAllow,
+			wantAnalyticCountry: "CRO",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "disallowed country USA – request rejected",
@@ -121,9 +131,12 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					},
 				}),
 			},
-			wantReject:     true,
-			wantNbrCode:    nbrCodeCountryBlocked,
-			wantMsgContain: "USA",
+			wantReject:          true,
+			wantNbrCode:         nbrCodeCountryBlocked,
+			wantMsgContain:      "USA",
+			wantAnalyticStatus:  hookanalytics.ResultStatusBlock,
+			wantAnalyticCountry: "USA",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "disallowed country DEU – request rejected",
@@ -134,9 +147,12 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					},
 				}),
 			},
-			wantReject:     true,
-			wantNbrCode:    nbrCodeCountryBlocked,
-			wantMsgContain: "DEU",
+			wantReject:          true,
+			wantNbrCode:         nbrCodeCountryBlocked,
+			wantMsgContain:      "DEU",
+			wantAnalyticStatus:  hookanalytics.ResultStatusBlock,
+			wantAnalyticCountry: "DEU",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "empty country string – request rejected",
@@ -147,8 +163,11 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					},
 				}),
 			},
-			wantReject:  true,
-			wantNbrCode: nbrCodeCountryBlocked,
+			wantReject:          true,
+			wantNbrCode:         nbrCodeCountryBlocked,
+			wantAnalyticStatus:  hookanalytics.ResultStatusBlock,
+			wantAnalyticCountry: "",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "nil Device – request passes (cannot determine country)",
@@ -157,8 +176,11 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					Device: nil,
 				}),
 			},
-			wantReject:  false,
-			wantNbrCode: 0,
+			wantReject:          false,
+			wantNbrCode:         0,
+			wantAnalyticStatus:  hookanalytics.ResultStatusAllow,
+			wantAnalyticCountry: "",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "nil Device.Geo – request passes (cannot determine country)",
@@ -167,24 +189,29 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 					Device: &openrtb2.Device{Geo: nil},
 				}),
 			},
-			wantReject:  false,
-			wantNbrCode: 0,
+			wantReject:          false,
+			wantNbrCode:         0,
+			wantAnalyticStatus:  hookanalytics.ResultStatusAllow,
+			wantAnalyticCountry: "",
+			wantActivityStatus:  hookanalytics.ActivityStatusSuccess,
 		},
 		{
 			name: "nil BidRequest – returns error in result, no rejection",
 			payload: hookstage.ProcessedAuctionRequestPayload{
 				Request: nil,
 			},
-			wantReject: false,
-			wantErrors: []string{"countryfilter: nil bid request in payload"},
+			wantReject:         false,
+			wantErrors:         []string{"countryfilter: nil bid request in payload"},
+			wantActivityStatus: hookanalytics.ActivityStatusError,
 		},
 		{
 			name: "nil RequestWrapper.BidRequest – returns error in result, no rejection",
 			payload: hookstage.ProcessedAuctionRequestPayload{
 				Request: &openrtb_ext.RequestWrapper{BidRequest: nil},
 			},
-			wantReject: false,
-			wantErrors: []string{"countryfilter: nil bid request in payload"},
+			wantReject:         false,
+			wantErrors:         []string{"countryfilter: nil bid request in payload"},
+			wantActivityStatus: hookanalytics.ActivityStatusError,
 		},
 	}
 
@@ -204,6 +231,21 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 
 			if tc.wantMsgContain != "" {
 				assert.Contains(t, result.Message, tc.wantMsgContain)
+			}
+
+			// Verify analytics tags are always populated.
+			require.Len(t, result.AnalyticsTags.Activities, 1, "expected exactly one analytics activity")
+			activity := result.AnalyticsTags.Activities[0]
+			assert.Equal(t, activityCountryFilter, activity.Name)
+			assert.Equal(t, tc.wantActivityStatus, activity.Status)
+
+			// For non-error cases, verify the result entry.
+			if tc.wantActivityStatus != hookanalytics.ActivityStatusError {
+				require.Len(t, activity.Results, 1, "expected exactly one analytics result")
+				analyticsResult := activity.Results[0]
+				assert.Equal(t, tc.wantAnalyticStatus, analyticsResult.Status)
+				assert.True(t, analyticsResult.AppliedTo.Request)
+				assert.Equal(t, tc.wantAnalyticCountry, analyticsResult.Values[analyticsKeyCountry])
 			}
 		})
 	}
@@ -233,6 +275,10 @@ func TestModuleHandleProcessedAuctionHook(t *testing.T) {
 		result, err := m.HandleProcessedAuctionHook(ctx, miCtx, payload)
 		require.NoError(t, err)
 		assert.False(t, result.Reject)
+		require.Len(t, result.AnalyticsTags.Activities, 1)
+		assert.Equal(t, hookanalytics.ActivityStatusSuccess, result.AnalyticsTags.Activities[0].Status)
+		require.Len(t, result.AnalyticsTags.Activities[0].Results, 1)
+		assert.Equal(t, hookanalytics.ResultStatusAllow, result.AnalyticsTags.Activities[0].Results[0].Status)
 	})
 
 	t.Run("disallowed country GBR rejected by module", func(t *testing.T) {
@@ -248,6 +294,11 @@ func TestModuleHandleProcessedAuctionHook(t *testing.T) {
 		assert.True(t, result.Reject)
 		assert.Equal(t, nbrCodeCountryBlocked, result.NbrCode)
 		assert.Contains(t, result.Message, "GBR")
+		require.Len(t, result.AnalyticsTags.Activities, 1)
+		assert.Equal(t, hookanalytics.ActivityStatusSuccess, result.AnalyticsTags.Activities[0].Status)
+		require.Len(t, result.AnalyticsTags.Activities[0].Results, 1)
+		assert.Equal(t, hookanalytics.ResultStatusBlock, result.AnalyticsTags.Activities[0].Results[0].Status)
+		assert.Equal(t, "GBR", result.AnalyticsTags.Activities[0].Results[0].Values[analyticsKeyCountry])
 	})
 
 	t.Run("different allowed countries set from config", func(t *testing.T) {
@@ -267,6 +318,7 @@ func TestModuleHandleProcessedAuctionHook(t *testing.T) {
 		result, err := m2.HandleProcessedAuctionHook(ctx, miCtx, payload)
 		require.NoError(t, err)
 		assert.False(t, result.Reject, "USA should be allowed with the second config")
+		assert.Equal(t, hookanalytics.ResultStatusAllow, result.AnalyticsTags.Activities[0].Results[0].Status)
 
 		// SVN is now blocked
 		payload2 := hookstage.ProcessedAuctionRequestPayload{
@@ -279,6 +331,7 @@ func TestModuleHandleProcessedAuctionHook(t *testing.T) {
 		result2, err := m2.HandleProcessedAuctionHook(ctx, miCtx, payload2)
 		require.NoError(t, err)
 		assert.True(t, result2.Reject, "SVN should be blocked with the second config")
+		assert.Equal(t, hookanalytics.ResultStatusBlock, result2.AnalyticsTags.Activities[0].Results[0].Status)
 	})
 }
 

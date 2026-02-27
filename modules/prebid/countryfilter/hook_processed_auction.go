@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/prebid/prebid-server/v3/hooks/hookanalytics"
 	"github.com/prebid/prebid-server/v3/hooks/hookstage"
 )
 
@@ -24,8 +25,10 @@ func handleProcessedAuctionHook(
 	payload hookstage.ProcessedAuctionRequestPayload,
 ) (hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload], error) {
 	result := hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload]{}
+	result.AnalyticsTags = newCountryFilterActivity()
 
 	if payload.Request == nil || payload.Request.BidRequest == nil {
+		result.AnalyticsTags.Activities[0].Status = hookanalytics.ActivityStatusError
 		result.Errors = append(result.Errors, "countryfilter: nil bid request in payload")
 		return result, nil
 	}
@@ -35,11 +38,13 @@ func handleProcessedAuctionHook(
 	// No device information – we cannot determine the country, so we allow
 	// the request through rather than blocking legitimate traffic.
 	if bidReq.Device == nil {
+		addAllowedAnalyticTag(&result, "")
 		return result, nil
 	}
 
 	// Device.Geo may also be nil.
 	if bidReq.Device.Geo == nil {
+		addAllowedAnalyticTag(&result, "")
 		return result, nil
 	}
 
@@ -52,6 +57,9 @@ func handleProcessedAuctionHook(
 			"countryfilter: request rejected, device country %q is not in the allowed list %v",
 			country, sortedKeys(allowedCountries),
 		)
+		addBlockedAnalyticTag(&result, country)
+	} else {
+		addAllowedAnalyticTag(&result, country)
 	}
 
 	return result, nil
