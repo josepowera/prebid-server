@@ -1,0 +1,100 @@
+# URL Segment Enricher Module Configuration
+#
+# This file documents the configuration options for the prebid.urlsegmentenricher module.
+# To use this module, add the following to your Prebid Server configuration file
+# (e.g., pbs.yaml) under the hooks.modules section.
+#
+# Example configuration:
+#
+# hooks:
+#   enabled: true
+#   modules:
+#     prebid:
+#       urlsegmentenricher:
+#         enabled: true
+#         external_url: "https://segments.example.com/api/v1/segments"
+#         timeout_ms: 500
+#         url_query_param: "url"
+#         segment_taxonomy: 4
+#         max_segments: 100
+#         segment_data_name: "urlsegmentenricher"
+#         additional_headers:
+#           Authorization: "Bearer your-api-token"
+#           X-Custom-Header: "custom-value"
+#   host_execution_plan:
+#     endpoints:
+#       /openrtb2/auction:
+#         stages:
+#           processed-auction-request:
+#             groups:
+#               - timeout: 500
+#                 hook_sequence:
+#                   - module_code: prebid.urlsegmentenricher
+#                     hook_impl_code: processed-auction-request
+
+# Configuration fields:
+#
+# enabled (bool, required):
+#   Controls whether the module is active.
+#   Default: false
+#
+# external_url (string, required):
+#   The endpoint to call for segment enrichment.
+#   The page URL from the bid request will be appended as a query parameter.
+#   Example: "https://segments.example.com/api/v1/segments"
+#
+# timeout_ms (int, optional):
+#   Maximum time in milliseconds to wait for the external URL response.
+#   Default: 500
+#
+# url_query_param (string, optional):
+#   The query parameter name used to pass the page URL to the external service.
+#   Default: "url"
+#
+# segment_taxonomy (int, optional):
+#   The IAB taxonomy value to use when adding segments.
+#   Default: 4 (IAB Audience Taxonomy 1.1)
+#
+# max_segments (int, optional):
+#   Maximum number of segments to add to the bid request.
+#   Set to 0 for unlimited.
+#   Default: 100
+#
+# segment_data_name (string, optional):
+#   The name to use for the segment data provider in the bid request.
+#   This is used as both the ID and Name of the openrtb2.Data object.
+#   Default: "urlsegmentenricher"
+#
+# additional_headers (map[string]string, optional):
+#   Additional HTTP headers to send with the external URL request.
+#   Useful for authentication tokens or custom headers.
+#   Default: empty
+
+# Expected external URL response format:
+#
+# The external URL should return a JSON response with the following structure:
+#
+# {
+#   "segments": [
+#     {
+#       "id": "segment-123",
+#       "name": "Sports Enthusiasts",
+#       "value": 0.85
+#     },
+#     {
+#       "id": "segment-456",
+#       "name": "Tech Savvy"
+#     }
+#   ]
+# }
+#
+# Fields:
+#   segments[].id (string, required): The segment identifier
+#   segments[].name (string, optional): Human-readable segment name
+#   segments[].value (float, optional): Numeric value associated with the segment
+
+# The module adds segments to the bid request in the following location:
+#
+# BidRequest.User.Data[].Segment[]
+#
+# This follows the OpenRTB 2.x specification for user data segments.
