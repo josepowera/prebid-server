@@ -1,0 +1,65 @@
+package countryfilter
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/prebid/prebid-server/v3/hooks/hookstage"
+)
+
+// nbrCodeCountryBlocked is the NBR (No-Bid Reason) code returned when a
+// request is rejected because the device country is not in the allowed list.
+// 8 = "blocked publisher" in the OpenRTB spec; we reuse it here as the
+// closest standard code for a geo-based block.
+const nbrCodeCountryBlocked = 8
+
+// handleProcessedAuctionHook contains the core filtering logic.
+// It is a standalone function so it can be unit-tested without constructing
+// a full Module.
+func handleProcessedAuctionHook(
+	payload hookstage.ProcessedAuctionRequestPayload,
+) (hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload], error) {
+	result := hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload]{}
+
+	if payload.Request == nil || payload.Request.BidRequest == nil {
+		result.Errors = append(result.Errors, "countryfilter: nil bid request in payload")
+		return result, nil
+	}
+
+	bidReq := payload.Request.BidRequest
+
+	// No device information – we cannot determine the country, so we allow
+	// the request through rather than blocking legitimate traffic.
+	if bidReq.Device == nil {
+		return result, nil
+	}
+
+	// Device.Geo may also be nil.
+	if bidReq.Device.Geo == nil {
+		return result, nil
+	}
+
+	country := bidReq.Device.Geo.Country
+
+	if _, allowed := allowedCountries[country]; !allowed {
+		result.Reject = true
+		result.NbrCode = nbrCodeCountryBlocked
+		result.Message = fmt.Sprintf(
+			"countryfilter: request rejected, device country %q is not in the allowed list %v",
+			country, sortedAllowedCountries(),
+		)
+	}
+
+	return result, nil
+}
+
+// sortedAllowedCountries returns the allowed country codes as a sorted slice,
+// used only for human-readable messages.
+func sortedAllowedCountries() []string {
+	list := make([]string, 0, len(allowedCountries))
+	for c := range allowedCountries {
+		list = append(list, c)
+	}
+	sort.Strings(list)
+	return list
+}
