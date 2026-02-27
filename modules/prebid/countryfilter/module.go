@@ -8,24 +8,33 @@ import (
 	"github.com/prebid/prebid-server/v3/modules/moduledeps"
 )
 
-// allowedCountries is the set of ISO 3166-1 alpha-3 country codes that are
-// permitted to participate in the auction. Requests from any other country
-// will be rejected at the ProcessedAuctionRequest stage.
-var allowedCountries = map[string]struct{}{
-	"SVN": {},
-	"CRO": {},
-}
-
 // Builder returns a new instance of the countryfilter Module.
 // It satisfies the modules.ModuleBuilderFn signature.
-func Builder(_ json.RawMessage, _ moduledeps.ModuleDeps) (interface{}, error) {
-	return Module{}, nil
+//
+// The raw JSON config is expected to contain an "allowed_countries" key with a
+// list of ISO 3166-1 alpha-3 country codes, e.g.:
+//
+//	hooks:
+//	  modules:
+//	    prebid:
+//	      countryfilter:
+//	        allowed_countries: ["SVN", "CRO"]
+func Builder(rawCfg json.RawMessage, _ moduledeps.ModuleDeps) (interface{}, error) {
+	cfg, err := newConfig(rawCfg)
+	if err != nil {
+		return nil, err
+	}
+	return Module{allowedCountries: cfg.toSet()}, nil
 }
 
 // Module is the country-filter Prebid Server module.
 // It implements the hookstage.ProcessedAuctionRequest interface so that it
 // is invoked after the bid request has been parsed and enriched.
-type Module struct{}
+type Module struct {
+	// allowedCountries is the set of ISO 3166-1 alpha-3 country codes that are
+	// permitted to participate in the auction, built from the module config.
+	allowedCountries map[string]struct{}
+}
 
 // HandleProcessedAuctionHook rejects any bid request whose device country is
 // not in the allowedCountries set.
@@ -38,5 +47,5 @@ func (m Module) HandleProcessedAuctionHook(
 	_ hookstage.ModuleInvocationContext,
 	payload hookstage.ProcessedAuctionRequestPayload,
 ) (hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload], error) {
-	return handleProcessedAuctionHook(payload)
+	return handleProcessedAuctionHook(m.allowedCountries, payload)
 }

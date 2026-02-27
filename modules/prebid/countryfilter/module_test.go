@@ -18,9 +18,56 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuilder(t *testing.T) {
-	module, err := Builder(json.RawMessage(nil), moduledeps.ModuleDeps{})
-	require.NoError(t, err)
-	assert.IsType(t, Module{}, module)
+	t.Run("valid config with allowed countries", func(t *testing.T) {
+		rawCfg := json.RawMessage(`{"allowed_countries":["SVN","CRO"]}`)
+		module, err := Builder(rawCfg, moduledeps.ModuleDeps{})
+		require.NoError(t, err)
+		m, ok := module.(Module)
+		require.True(t, ok, "Builder must return a Module")
+		assert.Contains(t, m.allowedCountries, "SVN")
+		assert.Contains(t, m.allowedCountries, "CRO")
+		assert.Len(t, m.allowedCountries, 2)
+	})
+
+	t.Run("empty allowed countries list", func(t *testing.T) {
+		rawCfg := json.RawMessage(`{"allowed_countries":[]}`)
+		module, err := Builder(rawCfg, moduledeps.ModuleDeps{})
+		require.NoError(t, err)
+		m, ok := module.(Module)
+		require.True(t, ok)
+		assert.Empty(t, m.allowedCountries)
+	})
+
+	t.Run("invalid JSON config returns error", func(t *testing.T) {
+		rawCfg := json.RawMessage(`not-valid-json`)
+		_, err := Builder(rawCfg, moduledeps.ModuleDeps{})
+		require.Error(t, err)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// newConfig
+// ---------------------------------------------------------------------------
+
+func TestNewConfig(t *testing.T) {
+	t.Run("parses allowed_countries correctly", func(t *testing.T) {
+		raw := json.RawMessage(`{"allowed_countries":["SVN","CRO","USA"]}`)
+		cfg, err := newConfig(raw)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"SVN", "CRO", "USA"}, cfg.AllowedCountries)
+	})
+
+	t.Run("empty JSON object yields empty slice", func(t *testing.T) {
+		raw := json.RawMessage(`{}`)
+		cfg, err := newConfig(raw)
+		require.NoError(t, err)
+		assert.Empty(t, cfg.AllowedCountries)
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		_, err := newConfig(json.RawMessage(`{bad`))
+		require.Error(t, err)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -28,6 +75,11 @@ func TestBuilder(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleProcessedAuctionHook(t *testing.T) {
+	allowedSet := map[string]struct{}{
+		"SVN": {},
+		"CRO": {},
+	}
+
 	tests := []struct {
 		name           string
 		payload        hookstage.ProcessedAuctionRequestPayload
@@ -138,7 +190,7 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := handleProcessedAuctionHook(tc.payload)
+			result, err := handleProcessedAuctionHook(allowedSet, tc.payload)
 
 			require.NoError(t, err, "handleProcessedAuctionHook must not return a Go error")
 			assert.Equal(t, tc.wantReject, result.Reject)
@@ -162,7 +214,11 @@ func TestHandleProcessedAuctionHook(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestModuleHandleProcessedAuctionHook(t *testing.T) {
-	m := Module{}
+	rawCfg := json.RawMessage(`{"allowed_countries":["SVN","CRO"]}`)
+	iface, err := Builder(rawCfg, moduledeps.ModuleDeps{})
+	require.NoError(t, err)
+	m := iface.(Module)
+
 	ctx := context.Background()
 	miCtx := hookstage.ModuleInvocationContext{}
 
@@ -192,6 +248,37 @@ func TestModuleHandleProcessedAuctionHook(t *testing.T) {
 		assert.True(t, result.Reject)
 		assert.Equal(t, nbrCodeCountryBlocked, result.NbrCode)
 		assert.Contains(t, result.Message, "GBR")
+	})
+
+	t.Run("different allowed countries set from config", func(t *testing.T) {
+		rawCfg2 := json.RawMessage(`{"allowed_countries":["USA","GBR"]}`)
+		iface2, err := Builder(rawCfg2, moduledeps.ModuleDeps{})
+		require.NoError(t, err)
+		m2 := iface2.(Module)
+
+		// USA is now allowed
+		payload := hookstage.ProcessedAuctionRequestPayload{
+			Request: wrapRequest(&openrtb2.BidRequest{
+				Device: &openrtb2.Device{
+					Geo: &openrtb2.Geo{Country: "USA"},
+				},
+			}),
+		}
+		result, err := m2.HandleProcessedAuctionHook(ctx, miCtx, payload)
+		require.NoError(t, err)
+		assert.False(t, result.Reject, "USA should be allowed with the second config")
+
+		// SVN is now blocked
+		payload2 := hookstage.ProcessedAuctionRequestPayload{
+			Request: wrapRequest(&openrtb2.BidRequest{
+				Device: &openrtb2.Device{
+					Geo: &openrtb2.Geo{Country: "SVN"},
+				},
+			}),
+		}
+		result2, err := m2.HandleProcessedAuctionHook(ctx, miCtx, payload2)
+		require.NoError(t, err)
+		assert.True(t, result2.Reject, "SVN should be blocked with the second config")
 	})
 }
 

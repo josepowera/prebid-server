@@ -16,7 +16,11 @@ const nbrCodeCountryBlocked = 8
 // handleProcessedAuctionHook contains the core filtering logic.
 // It is a standalone function so it can be unit-tested without constructing
 // a full Module.
+//
+// allowedCountries is the set of permitted ISO 3166-1 alpha-3 country codes
+// built from the module configuration at startup.
 func handleProcessedAuctionHook(
+	allowedCountries map[string]struct{},
 	payload hookstage.ProcessedAuctionRequestPayload,
 ) (hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload], error) {
 	result := hookstage.HookResult[hookstage.ProcessedAuctionRequestPayload]{}
@@ -46,19 +50,19 @@ func handleProcessedAuctionHook(
 		result.NbrCode = nbrCodeCountryBlocked
 		result.Message = fmt.Sprintf(
 			"countryfilter: request rejected, device country %q is not in the allowed list %v",
-			country, sortedAllowedCountries(),
+			country, sortedKeys(allowedCountries),
 		)
 	}
 
 	return result, nil
 }
 
-// sortedAllowedCountries returns the allowed country codes as a sorted slice,
+// sortedKeys returns the keys of a string set as a sorted slice,
 // used only for human-readable messages.
-func sortedAllowedCountries() []string {
-	list := make([]string, 0, len(allowedCountries))
-	for c := range allowedCountries {
-		list = append(list, c)
+func sortedKeys(set map[string]struct{}) []string {
+	list := make([]string, 0, len(set))
+	for k := range set {
+		list = append(list, k)
 	}
 	sort.Strings(list)
 	return list
